@@ -1,75 +1,55 @@
 package main
 
 import (
-	"context"
+	"encoding/json"
 	"fmt"
+	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
-	"github.com/sashabaranov/go-openai"
-	searcher "github.com/serpapi/google-search-results-golang"
+	"go.mongodb.org/mongo-driver/bson"
 	"log"
+	"net/http"
 	"os"
+	"webSurfer/db"
+	"webSurfer/routers"
 )
+
+type Response struct {
+	Message string `json:"message"`
+	Success bool   `json:"success"`
+}
+
+func checkConnection(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	response := Response{Message: "Hello", Success: true}
+
+	json.NewEncoder(w).Encode(response)
+}
 
 func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Fatal("Error loading .env file")
 	}
-
-	fmt.Print(find("Как сделать кофе"))
-}
-
-func find(query string) any {
-	apiKey := os.Getenv("SEARCH_API")
-
-	fmt.Printf("apikey: %v\n", apiKey)
-
-	parameter := map[string]string{
-		"q":             query,
-		"location":      "Austin, Texas, United States",
-		"hl":            "en",
-		"gl":            "us",
-		"google_domain": "google.com",
-		"api_key":       apiKey,
+	dbURI := os.Getenv("MONGODB_URI")
+	if err := db.ConnectDB(dbURI); err != nil {
+		fmt.Println("Failed to connect to the database:", err)
+		return
 	}
 
-	fmt.Print(parameter)
-
-	search := searcher.NewGoogleSearch(parameter, apiKey)
-	results, err := search.GetJSON()
-
+	result, err := db.GetDocument("mycollection", bson.D{{"key", "value"}})
 	if err != nil {
-		fmt.Print(err)
+		fmt.Println("Error querying the database:", err)
+		return
 	}
 
-	organic_results := results["organic_results"].([]interface{})
-	return organic_results
-}
+	fmt.Print(result)
 
-func generate(content string, useWeb bool) string {
-	apiKey := os.Getenv("OPENAI_API")
-	if apiKey == "" {
-		log.Fatal("OPENAI_API is empty. Make sure it is set in your .env file.")
-	}
-	fmt.Printf("apikey: %v\n", apiKey)
-	client := openai.NewClient(apiKey)
-	resp, err := client.CreateChatCompletion(
-		context.Background(),
-		openai.ChatCompletionRequest{
-			Model: openai.GPT3Dot5Turbo,
-			Messages: []openai.ChatCompletionMessage{
-				{
-					Role:    openai.ChatMessageRoleUser,
-					Content: content,
-				},
-			},
-		},
-	)
+	router := gin.Default()
 
-	if err != nil {
-		fmt.Printf("ChatCompletion error: %v\n", err)
-		fmt.Printf("Full resp: %v\n", resp)
-		return "\"ChatCompletion error: %v\\n\", err"
+	api := router.Group("/api")
+	{
+		routers.SetupUsersRouter(api)
 	}
 
-	return resp.Choices[0].Message.Content
+	router.Run(":8080")
 }
